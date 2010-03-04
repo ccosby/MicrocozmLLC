@@ -1,5 +1,10 @@
 package net.microcozm.OggTag;
 
+import android.util.Log;
+import java.io.BufferedInputStream;
+import java.io.FileInputStream;
+import java.util.Hashtable;
+
 /**
  *
  * @author cosbyc
@@ -13,9 +18,12 @@ package net.microcozm.OggTag;
 public class OggVorbisHeader {
 
 	// First four bytes of stream are always OggS
+	private static final String TAG = "OggVorbisHeader";
 	private static final String OGGHEADERFLAG = "OggS";
-
+	private static final int BUFSZ = 8192;
 	private String uri;
+	private BufferedInputStream file;
+	private Hashtable data;
 
 	/**
 	 * Opens an Ogg Vorbis file, ensuring that it exists and is actuall an
@@ -26,7 +34,25 @@ public class OggVorbisHeader {
 	 * @return		void
 	 */
 	public OggVorbisHeader(String uri) {
-		this.uri = uri;
+		try {
+			Log.v(TAG,"__construct()");
+			this.uri = uri;
+			this.file = new BufferedInputStream(new FileInputStream(uri), BUFSZ);
+
+			// Init the reader
+			int startInfoHeader = this._init();
+			if (startInfoHeader >= 0) {
+				this._loadInfo(startInfoHeader);
+
+			} else {
+				Log.v(TAG, "startInfoHeader is " + String.valueOf(startInfoHeader));
+				
+			}
+
+		} catch (Exception e) {
+			e.printStackTrace();
+
+		}
 	}
 
 	/**
@@ -68,43 +94,95 @@ public class OggVorbisHeader {
 		return r;
 	}
 
-	
-/**
- * Returns the URI of the file the object represents
- * 
- * @return	String	
- */
+	/**
+	 * Returns the URI of the file the object represents
+	 *
+	 * @return	String
+	 */
 	public String path() {
 		return this.uri;
 	}
 
-	public void _init() {
+	/**
+	 * Initialize the reader and return where the Ogg Vorbis Header starts.
+	 * 
+	 * @param	file	BufferedInputStream
+	 * @return	int		Byte position of Ogg Vorbis Header
+	 */
+	private int _init() {
+		Log.v(TAG, "_init(" + uri + ")");
+
+		int buffer = 0;
+		int pageSegCount = 0;
+
+		int byteCount = _skipID3Header(this.file);
+		if ( byteCount > 0) {
+
+		}
+
+		return byteCount;
 	}
 
-	public void _skipID3Header() {
+	private int _skipID3Header(BufferedInputStream file) {
+		/**
+		 * Read the first 3 bytes of the file. If it's an ID3 header, read
+		 * through it until we find the Ogg Header. Return the byte offset
+		 * to make future reads skip to the right place.
+		 */
+		try {
+			byte[] buffer = new byte[3];
+			file.read(buffer, 0, buffer.length);
+			if (String.valueOf(buffer).equals("ID3")) {
+				Log.v(TAG, "Found ID3 Header");
+				buffer = new byte[BUFSZ];
+				while (file.available() != 0) {
+					file.read(buffer, 0, buffer.length);
+					Log.v(TAG, "Not Implemented - string search for " + OGGHEADERFLAG);
+					/**
+					my $found;
+					if (($found = index($buffer, OGGHEADERFLAG)) >= 0) {
+						$byteCount += $found;
+						seek $fh, $byteCount, 0;
+						last;
+					} else {
+						$byteCount += 4096;
+					}
+					 */
+				}
+				return -1;
+
+			} else {
+				Log.v(TAG, "No ID3 Header");
+				file.mark(0);
+				file.reset();
+				return 0;
+			}
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		return -1;
 	}
 
-	public void _checkHeader() {
+	private void _loadInfo(int startInfoHeader) {
 	}
 
-	public void _loadInfo() {
+	private void _loadComments(Hashtable data) {
 	}
 
-	public void _loadComments() {
+	private void _processComments() {
 	}
 
-	public void _processComments() {
+	private void Get8u() {
 	}
 
-	public void Get8u() {
+	private void Get32u() {
 	}
 
-	public void Get32u() {
+	private void _calculateTrackLength(Hashtable data) {
 	}
 
-	public void _calculateTrackLength() {
-	}
-
-	public void _decodeInt() {
+	private void _decodeInt() {
 	}
 }
