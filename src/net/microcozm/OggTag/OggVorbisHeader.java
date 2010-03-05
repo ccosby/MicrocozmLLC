@@ -51,7 +51,7 @@ public class OggVorbisHeader {
 			// Initialize the reader
 			int startInfoHeader = _checkHeader();
 			if ( startInfoHeader >= 0 ) {
-				this._loadInfo();
+				this._loadInfo(startInfoHeader);
 
 			} else {
 				Log.v(TAG, "startInfoHeader = " + String.valueOf(startInfoHeader));
@@ -225,11 +225,13 @@ public class OggVorbisHeader {
 	 * 
 	 * @param startInfoHeader
 	 */
-	private void _loadInfo() {
+	private int _loadInfo(final int startInfoHeader) {
+		int byteCount = startInfoHeader;
+
 		try {
 			// read 23 bytes, all of the audio data
 			byte[] b = new byte[23];
-			this.reader.read(b, 0, b.length);
+			byteCount += this.reader.read(b, 0, b.length);
 
 			// convert the audio data into a Little Endian ByteBuffer
 			ByteBuffer bb = ByteBuffer.wrap(b);
@@ -259,10 +261,30 @@ public class OggVorbisHeader {
 			int bitrate_lower = bb.getInt();
 			barf("bitrate_lower: " + bitrate_lower);
 
+			/**
+			 * read the blocksize_0 and blocksize_1 these are each 4 bit fields,
+			 * whose actual value is 2 to the power of the value of the field
+			 */
+			int blocksize = (int) bb.get();
+			int blocksize_0 = 2 << ((blocksize & 0xF0) >> 4);
+			int blocksize_1 = 2 << (blocksize & 0x0F);
+			barf("blocksize_0: " + blocksize_0);
+			barf("blocksize_1: " + blocksize_1);
+
+			// read the framing_flag
+			int framing_flag = (int) bb.get();
+			barf("framing_flag: " + framing_flag);
+
+			// bitrate_window is -1 in the current version of vorbisfile
+			int bitrate_window = -1;
+			barf("bitrate_window:" + bitrate_window);
+
 		} catch ( IOException e ) {
 			barf(e.toString());
 
 		}
+
+		return byteCount;
 	}
 
 	private void _loadComments() {
@@ -283,7 +305,7 @@ public class OggVorbisHeader {
 	private void barf(final String e) {
 		int duration = Toast.LENGTH_SHORT;
 		Toast toast = Toast.makeText(this.context, e, duration);
-		toast.show();
+		// toast.show();
 
 		Log.v(TAG, e);
 	}
