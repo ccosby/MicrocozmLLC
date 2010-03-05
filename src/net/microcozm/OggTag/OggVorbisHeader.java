@@ -4,9 +4,11 @@ import android.content.Context;
 import android.util.Log;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.BufferedInputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
  * 
@@ -26,7 +28,7 @@ public class OggVorbisHeader {
 	private static final int BUFSZ = 4096;
 
 	private String uri;
-	private BufferedReader file;
+	private BufferedInputStream reader;
 	private Context context;
 
 	/**
@@ -38,22 +40,21 @@ public class OggVorbisHeader {
 	 *            A file URI to the Ogg Vorbis file
 	 * @return void
 	 */
-	public OggVorbisHeader(Context context, String uri) {
+	public OggVorbisHeader(final Context context, final String uri) {
 		try {
 			Log.v(TAG, "__construct()");
 
 			this.context = context;
 			this.uri = uri;
-			this.file = new BufferedReader(new FileReader(uri), BUFSZ);
+			this.reader = new BufferedInputStream(new FileInputStream(uri), BUFSZ);
 
 			// Initialize the reader
-			int startInfoHeader = _checkHeader(this.file);
-			barf("startInfoHeader :: " + String.valueOf(startInfoHeader) + " bytes");
+			int startInfoHeader = _checkHeader();
 			if ( startInfoHeader >= 0 ) {
-				this._loadInfo(startInfoHeader);
+				this._loadInfo();
 
 			} else {
-				Log.v(TAG, "startInfoHeader is " + String.valueOf(startInfoHeader));
+				Log.v(TAG, "startInfoHeader = " + String.valueOf(startInfoHeader));
 
 			}
 
@@ -78,7 +79,7 @@ public class OggVorbisHeader {
 	 *            Single key to retrieve
 	 * @return void Hash of file info headers
 	 */
-	public void info(String key) {
+	public void info(final String key) {
 	}
 
 	/**
@@ -99,7 +100,7 @@ public class OggVorbisHeader {
 	 *            Key to retrieve value list for
 	 * @return String[] Array of comment values
 	 */
-	public String[] comment(String key) {
+	public String[] comment(final String key) {
 		String[] r = new String[0];
 		return r;
 	}
@@ -113,7 +114,7 @@ public class OggVorbisHeader {
 		return this.uri;
 	}
 
-	private int _skipID3Header(BufferedReader file) {
+	private int _skipID3Header() {
 		/**
 		 * Read the first 3 bytes of the file. If it's an ID3 header, read
 		 * through it until we find the Ogg Header. Return the byte offset to
@@ -124,14 +125,14 @@ public class OggVorbisHeader {
 			 * Mark the file for reset - invalidate this mark if we read past
 			 * the ID3 header flag.
 			 */
-			file.mark(ID3.length() + 1);
+			this.reader.mark(ID3.length() + 1);
 
-			char[] b = new char[ID3.length()];
-			file.read(b, 0, b.length);
+			byte[] b = new byte[ID3.length()];
+			this.reader.read(b, 0, b.length);
 			if ( String.valueOf(b).equals(ID3) ) {
 				Log.v(TAG, "Found ID3 Header");
-				b = new char[BUFSZ];
-				while ( file.read(b, 0, b.length) != -1 ) {
+				b = new byte[BUFSZ];
+				while ( this.reader.read(b, 0, b.length) != -1 ) {
 					Log.v(TAG, "Not Implemented - string search for OggS");
 					/**
 					 * my $found; if (($found = index($buffer, OGGHEADERFLAG))
@@ -143,7 +144,7 @@ public class OggVorbisHeader {
 
 			} else {
 				Log.v(TAG, "No ID3 Header");
-				file.reset();
+				this.reader.reset();
 				return 0;
 			}
 
@@ -155,15 +156,14 @@ public class OggVorbisHeader {
 		return -1;
 	}
 
-	private int _checkHeader(BufferedReader file) {
-		int byteCount = _skipID3Header(this.file);
+	private int _checkHeader() {
+		int byteCount = _skipID3Header();
 
 		try {
-
 			// check that the first 4 bytes are 'OggS'
-			char[] b = new char[27];
-			byteCount += file.read(b, 0, b.length);
-			if ( !String.valueOf(b).substring(0, 0 + 4).equals("OggS") ) {
+			byte[] b = new byte[27];
+			byteCount += this.reader.read(b, 0, b.length);
+			if ( !new String(b, 0, 4).equals("OggS") ) {
 				barf("This is not an Ogg bitstream (no OggS header).");
 				return -1;
 			}
@@ -188,23 +188,23 @@ public class OggVorbisHeader {
 
 			// read the number of page segments
 			int pageSegCount = (int) b[26];
-			barf("pageSegCount :: " + pageSegCount);
 
 			// read pageSegCount bytes, then throw 'em out
-			b = new char[pageSegCount];
-			byteCount += file.read(b, 0, b.length);
+			b = new byte[pageSegCount];
+			byteCount += this.reader.read(b, 0, b.length);
+
+			// read the next 7 bytes for packet type and identifier
+			b = new byte[7];
+			byteCount += this.reader.read(b, 0, b.length);
 
 			// check packet type. Should be 0x01 (for identification header)
-			b = new char[7];
-			byteCount += file.read(b, 0, b.length);
 			if ( b[0] != 0x01 ) {
 				barf("Wrong vorbis header type, giving up.");
 				return -1;
 			}
 
 			// check that the packet identifies itself as 'vorbis'
-			Log.v(TAG, String.valueOf(b).substring(1, 1 + 6));
-			if ( !String.valueOf(b).substring(1, 1 + 6).equals("vorbis") ) {
+			if ( !new String(b, 1, 6).equals("vorbis") ) {
 				barf("This does not appear to be a vorbis stream, giving up.");
 				return -1;
 			}
@@ -220,34 +220,67 @@ public class OggVorbisHeader {
 
 	}
 
-	private void _loadInfo(int startInfoHeader) {
+	/**
+	 * Read audio info
+	 * 
+	 * @param startInfoHeader
+	 */
+	private void _loadInfo() {
+		try {
+			// read 23 bytes, all of the audio data
+			byte[] b = new byte[23];
+			this.reader.read(b, 0, b.length);
+
+			// convert the audio data into a Little Endian ByteBuffer
+			ByteBuffer bb = ByteBuffer.wrap(b);
+			bb.order(ByteOrder.LITTLE_ENDIAN);
+
+			// read the vorbis version
+			int version = bb.getInt();
+			barf("version: " + version);
+
+			// read the number of audio channels
+			int channels = (int) bb.get();
+			barf("channels: " + channels);
+
+			// read the sample rate
+			int rate = bb.getInt();
+			barf("rate: " + rate);
+
+			// read the bitrate maximum
+			int bitrate_upper = bb.getInt();
+			barf("bitrate_upper: " + bitrate_upper);
+
+			// read the bitrate nominal
+			int bitrate_nominal = bb.getInt();
+			barf("bitrate_nominal: " + bitrate_nominal);
+
+			// read the bitrate minimal
+			int bitrate_lower = bb.getInt();
+			barf("bitrate_lower: " + bitrate_lower);
+
+		} catch ( IOException e ) {
+			barf(e.toString());
+
+		}
 	}
 
-	@SuppressWarnings("unused")
 	private void _loadComments() {
 	}
 
-	@SuppressWarnings("unused")
 	private void _processComments() {
 	}
 
-	@SuppressWarnings("unused")
 	private void Get8u() {
 	}
 
-	@SuppressWarnings("unused")
 	private void Get32u() {
 	}
 
-	@SuppressWarnings("unused")
 	private void _calculateTrackLength() {
 	}
 
-	@SuppressWarnings("unused")
-	private void _decodeInt() {
-	}
-
-	private void barf(String e) {
+	private void barf(final String e) {
 		int duration = Toast.LENGTH_SHORT;
 		Toast toast = Toast.makeText(this.context, e, duration);
 		toast.show();
