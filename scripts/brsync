@@ -1,0 +1,119 @@
+#!/bin/bash
+#
+# $Id: brsync,v 1.5 2006-11-09 02:38:47 ccosby Exp $
+#
+
+PATH=/bin:/usr/bin
+
+: ${totape:='no'}
+: ${tapeopts:='cvf'}
+
+procname=$(basename $0)
+pid=$$
+logf="/var/log/${procname}.log"
+maillogf="/tmp/${procname}.maillog.${pid}"
+pidf="/var/run/${procname}.pid"
+
+usage() {
+cat <<EOF
+Usage: ${procname} [OPTION] SERVER [SERVER]...
+
+Options:
+  -v verbose   log messages to stdout and to logf
+  -t totape    write to tape ( y|Y|1|yes or n|N|0|no )
+  -j           compress using bzip2 to tape (noop unless -t)
+  -m mailto    mail recipients (quoted, space delimited)
+  -z           compress using gzip to tape (noop unless -t)
+EOF
+}
+
+log() {
+	while read message; do
+		now=$(date +"%b %d %H:%M:%S")
+		[ "$verbose" -eq 1 ] && printf "%s %s[%d]: %s\n" "${now}" "${procname}" "${pid}" "${message}"
+		printf "%s %s[%d]: %s\n" "${now}" "${procname}" "${pid}" "${message}" >> ${logf}
+	done
+}
+
+maillog() {
+	while read message; do
+		now=$(date +"%b %d %H:%M:%S")
+		printf "%s %s[%d]: %s\n" "${now}" "${procname}" "${pid}" "${message}" >> ${maillogf}
+	done
+}
+
+while getopts jvzm:t: CURARG; do
+	case "${CURARG}" in
+		t)
+		case "${OPTARG}" in
+			yes|y|Y|1)	totape='yes' ;;
+			no|n|N|0)	totape='no' ;;
+			*)			totape='yes' ;;
+		esac
+		;;
+		j) tapeopts='cvjf' ;;
+		m) logrecipients="${OPTARG}" ;;
+		v) verbose=1 ;;
+		z) tapeopts='cvzf' ;;
+		*) continue ;;
+	esac
+done
+shift $((${OPTIND} - 1))
+[ $# -lt 1 ] && { usage; exit -1; }
+
+: ${logrecipients:='root'}
+: ${verbose:=0}
+
+echo "Started backup of: $*" | log
+echo "Started backup of: $*" | maillog
+
+# Backup all of the servers to our new backup directory
+for BSERVER in $*; do
+	TODAY=$(date +%A)
+	BU_BASE=/backup/Servers
+	SERVER_BASE=${BU_BASE}/${BSERVER}
+	CURRENT=${SERVER_BASE}/current
+	INCREMENTAL=${SERVER_BASE}/${TODAY}
+	EXCLUDES=${SERVER_BASE}/excludes
+	INCLUDES=${SERVER_BASE}/includes
+
+	LOCAL="--force --ignore-errors --delete-excluded --exclude-from=${EXCLUDES} --files-from=${INCLUDES} --numeric-ids --delete --backup --backup-dir=${INCREMENTAL} --partial -avr"
+	OPTS="--rsh=ssh ${LOCAL}"
+
+	# Create things that may/may not exist
+	[ -r ${INCLUDES} ] || touch ${INCLUDES}
+	[ -r ${EXCLUDES} ] || touch ${EXCLUDES}
+
+	empty="$(mktemp -d)/"
+	trap "rmdir ${empty}; exit 1;" TERM KILL INT QUIT EXIT
+	mkdir -p ${INCREMENTAL}
+	rsync --delete -a ${empty} ${INCREMENTAL}
+
+	case "${BSERVER}" in
+		localhost) rsync ${LOCAL} / ${CURRENT} 2>&1 | log ;;
+		*)	rsync ${OPTS} ${BSERVER}:/ ${CURRENT} 2>&1 | log ;;
+	esac
+done
+
+if [ "${totape}" = 'yes' ]; then
+	# Copy everything off to tape
+	/bin/tar ${tapeopts} /dev/st0 /backup/Servers/*/current
+	/bin/mt -f /dev/st0 eject
+fi
+
+lx="$procname\[$pid\]:"
+grep	-e"$lx rsync error" \
+		-e"$lx sent" \
+		-e"$lx total size" \
+		$logf | maillog
+
+echo "Finished backup" | log
+echo "Finished backup" | maillog
+
+cat ${maillogf} | mail -e -s "Backup log at $(date)" "${logrecipients}"
+[ "$BSERVER" = "localhost" ] || scp $maillogf $BSERVER:/var/log/${procname}.log.$(hostname)
+rm -f ${maillogf}
+
+exit
+
+# vim600:ts=4:sw=4:noexpandtab
