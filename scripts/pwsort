@@ -1,0 +1,78 @@
+#!/usr/bin/env perl
+
+use strict;
+
+foreach my $f ( qw/passwd shadow group gshadow/ ) {
+	unlink "/etc/$f+";
+	qx(cp -a /etc/$f /etc/$f+);
+}
+
+my %passwd = ();
+my %shadow = ();
+my %group = ();
+my %gshadow = ();
+
+open PASSWD, "</etc/passwd" or die $!;
+while (my $passwd = <PASSWD>) {
+	chomp $passwd;
+	next if $passwd =~ m/^\s+$/;
+	my ($uname,undef,$uid,undef) = split /:/, $passwd, 4;
+	die "Duplicate uid $uid in /etc/passwd" if $passwd{$uid};
+	$passwd{$uid}->{passwd} = $passwd;
+	$passwd{$uid}->{uname} = $uname;
+}
+close PASSWD;
+
+open SHADOW, "</etc/shadow" or die $!;
+while (my $shadow = <SHADOW>) {
+	chomp $shadow;
+	next if $shadow =~ m/^\s+$/;
+	my ($uname,undef) = split /:/, $shadow, 2;
+	die "Duplicate uname $uname in /etc/shadow" if $shadow{$uname};
+	$shadow{$uname} = $shadow;
+}
+close SHADOW;
+
+open PASSWD, ">/tmp/passwd.sorted" or die $!;
+open SHADOW, ">/tmp/shadow.sorted" or die $!;
+foreach my $uid ( sort { $a <=> $b } keys %passwd ) {
+	my $uname = $passwd{$uid}->{uname};
+	if ( $shadow{$uname} ) {
+		print PASSWD $passwd{$uid}->{passwd}."\n";
+		print SHADOW $shadow{$uname}."\n";
+	} else {
+		die "No shadow entry for $uname\n";
+	}
+}
+close PASSWD;
+close SHADOW;
+
+open GROUP, "</etc/group" or die $!;
+while (my $group = <GROUP>) {
+	chomp $group;
+	next if $group =~ m/^\s+$/;
+	my ($gname,undef,$gid,$members) = split /:/, $group, 4;
+	die "Duplicate gid $gid in /etc/group" if $group{$gid};
+	$group{$gid}->{group} = $group;
+	$group{$gid}->{gname} = $gname;
+	$group{$gid}->{members} = $members;
+}
+close GROUP;
+
+open GROUP, ">/tmp/group.sorted" or die $!;
+open GSHADOW, ">/tmp/gshadow.sorted" or die $!;
+foreach my $gid ( sort { $a <=> $b } keys %group ) {
+	my $gname = $group{$gid}->{gname};
+	print GROUP $group{$gid}->{group}."\n";
+	printf GSHADOW "%s:!::%s\n", $gname, $group{$gid}->{members};
+}
+close GROUP;
+close GSHADOW;
+
+foreach my $f ( qw/passwd shadow group gshadow/ ) {
+	qx(cp /tmp/$f.sorted /etc/$f);
+	qx(touch -r /etc/$f+ /etc/$f);
+	unlink "/tmp/$f.sorted";
+}
+
+exit 0;
