@@ -1,0 +1,13 @@
+#!/bin/bash
+
+[ -z "$1" ] && { echo "Usage: $0 <...-local.gz package url>"; exit 1; }
+package=$1; shift
+
+pkgbase=$(basename $package)
+pkgnm=$(basename $package .gz)
+
+rm -rf $pkgnm
+wget -c $package
+gzip -cd $pkgbase > $pkgnm
+yes|pkgadd -d $pkgnm all
+rm -f $pkgnm
