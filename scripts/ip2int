@@ -1,0 +1,35 @@
+#!/usr/bin/perl
+
+# int2ip.pl	ccosby	0.1	31-Jan-2002
+# The polar opposite of ip2int.pl
+# Convert a dotted quad IP address into an integer as found in dncsdb
+#
+use Socket;
+use strict;
+
+my $VERSION = 0.1;
+my $DATE = "31-Jan-2002";
+
+# need to pass at least 1 ip address in
+usage() if $#ARGV < 0;
+
+my $i = 0;				# only needed for the old version of perl on DNCS (5.003)
+for ( $i=0; $i<=$#ARGV; $i++ ) {	# only needed for the old version of perl on DNCS (5.003)
+#foreach my $ip (@ARGV) {		# works with any recent perl
+	my $ip = $ARGV[$i];
+	my $ipInt = unpack('N', inet_aton($ip));
+	printf("%s   %d\n", $ip, $ipInt);
+}
+
+exit 0;
+
+
+sub usage {
+	print <<EOF;
+ip2int.pl version $VERSION [$DATE] (Perl $])
+
+Usage: ip2int.pl ip1 [ip2 ip3 ip4 ...]
+
+EOF
+	exit 1;
+}
